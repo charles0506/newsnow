@@ -37,6 +37,10 @@
     probeIntervalMs: 4000,
     // 校準分頁最多等幾毫秒
     calibrateTimeoutMs: 25_000,
+    // 進站時自動選好的圖層（Windy 的 overlay 代號）。設成 null 就不要動它
+    defaultOverlay: "rain",
+    // 「此地點的天氣預報」面板打開時自動切到的頁籤（比對頁籤文字）。設成 null 就不要動它
+    defaultDetailTab: "meteogram",
   }
 
   const KEY = {
@@ -624,6 +628,123 @@
   }
 
   // ---------------------------------------------------------------------------
+  // 六、順手的預設值
+  //     (1) 進站直接選降雨圖層
+  //     (2) 「此地點的天氣預報」打開時直接切到 Meteogram
+  // ---------------------------------------------------------------------------
+  let overlayDone = false
+  let overlayTries = 0
+
+  function applyDefaultOverlay() {
+    const want = CONFIG.defaultOverlay
+    if (!want || overlayDone) return
+
+    // 網址已經指定別的圖層（例如 https://www.windy.com/?wind,25.0,121.5,8）就尊重使用者
+    const fromUrl = /^\?([a-z0-9]+)[,&]/i.exec(location.search)
+    if (fromUrl && fromUrl[1].toLowerCase() !== want.toLowerCase()) {
+      overlayDone = true
+      log("網址已指定圖層，不覆蓋", fromUrl[1])
+      return
+    }
+
+    if (overlayTries++ > 20) return // Windy 一直沒載起來就放棄，不要一直戳
+
+    const store = window.W?.store
+    try {
+      if (store?.get?.("overlay") === want) {
+        overlayDone = true
+        return
+      }
+      if (typeof store?.set === "function") {
+        store.set("overlay", want)
+        log("已切換圖層", want)
+        return // 下一輪用 store.get 確認
+      }
+    } catch (err) {
+      log("切換圖層失敗", err)
+    }
+
+    // 後備：直接點畫面上的圖層按鈕
+    const btn = document.querySelector(`[data-overlay="${want}"], #overlay-${want}`)
+    if (btn) {
+      btn.click()
+      overlayDone = true
+      log("已用 DOM 切換圖層", want)
+    }
+  }
+
+  // 面板關掉再打開時要能再切一次，所以用「面板還在不在」來決定要不要重置
+  let detailTabDone = false
+
+  // 面板裡可能有同名的標題，所以挑「最像頁籤」的那一個來點，而不是第一個
+  function findTab(label) {
+    const wanted = new RegExp(label, "i")
+    let best = null
+    let bestScore = -1
+
+    for (const node of document.querySelectorAll("a, button, li, span, div")) {
+      if (node.children.length > 1) continue // 只看最裡層的文字節點
+      const text = (node.textContent || "").trim()
+      if (text.length > 20 || !wanted.test(text)) continue
+      if (!node.offsetParent && node.offsetWidth === 0) continue // 沒顯示出來
+
+      const tag = node.tagName
+      const hint = `${node.className || ""} ${node.id || ""} ${node.getAttribute?.("role") || ""}`
+      let score = 0
+      if (tag === "A" || tag === "BUTTON") score += 3
+      if (/tab|btn|button|switch|menu/i.test(hint)) score += 2
+      if (node.getAttribute?.("data-do") || node.getAttribute?.("data-ref")) score += 1
+      if (score > bestScore) {
+        best = node
+        bestScore = score
+      }
+    }
+    return best
+  }
+
+  function isActive(node) {
+    for (let n = node; n && n !== document.body; n = n.parentElement) {
+      if (/(^|\s)(active|selected|on)(\s|$)/.test(n.className || "")) return true
+    }
+    return false
+  }
+
+  function applyDefaultDetailTab() {
+    const label = CONFIG.defaultDetailTab
+    if (!label) return
+
+    const tab = findTab(label)
+    if (!tab) {
+      detailTabDone = false // 面板關了，下次打開再切一次
+      return
+    }
+    if (detailTabDone) return
+
+    detailTabDone = true
+    if (!isActive(tab)) {
+      tab.click()
+      log("已切換頁籤", label)
+    }
+  }
+
+  function watchDetailPanel() {
+    let scheduled = false
+    const observer = new MutationObserver(() => {
+      if (scheduled) return
+      scheduled = true
+      setTimeout(() => {
+        scheduled = false
+        try {
+          applyDefaultDetailTab()
+        } catch (err) {
+          log("切換頁籤失敗", err)
+        }
+      }, 120) // 等面板畫完再動作
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+  }
+
+  // ---------------------------------------------------------------------------
   // 啟動
   // ---------------------------------------------------------------------------
   installNetworkSniffer()
@@ -637,6 +758,7 @@
     }
     probeWindyInternals()
     recompute()
+    applyDefaultOverlay()
   }
 
   function boot() {
@@ -646,6 +768,7 @@
     }
     createBadge()
     restoreSnapshot()
+    watchDetailPanel()
     tick()
     setInterval(tick, CONFIG.probeIntervalMs)
     setInterval(render, 1000) // 倒數每秒重畫
@@ -666,6 +789,17 @@
     calibrate: startCalibration,
     calibration: () => readJSON(KEY.calib, {}),
     parseInfoPage: () => parseInfoPage(document.body?.innerText),
+    setOverlay: (name = CONFIG.defaultOverlay) => {
+      overlayDone = false
+      overlayTries = 0
+      CONFIG.defaultOverlay = name
+      applyDefaultOverlay()
+    },
+    openTab: (label = CONFIG.defaultDetailTab) => {
+      detailTabDone = false
+      CONFIG.defaultDetailTab = label
+      applyDefaultDetailTab()
+    },
     reset: () => Object.values(KEY).forEach(k => localStorage.removeItem(k)),
   }
 })()

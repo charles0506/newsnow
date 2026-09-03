@@ -4,6 +4,9 @@
 **多久前更新**、**下次更新倒數**、參考時間（ref 12Z）與更新間隔，
 不用再點進 <https://www.windy.com/info> 才看得到。
 
+順便處理兩個每次都要手動點的預設值：**進站直接選降雨圖層**、
+**「此地點的天氣預報」打開時直接切到 Meteogram**。
+
 檔案：[`windy-update-badge.user.js`](./windy-update-badge.user.js)
 
 ## 該做瀏覽器擴充功能，還是暴力猴腳本？
@@ -50,6 +53,21 @@ ECMWF 12Z 的跑批大約 +8 小時才發布，所以拿參考時間直接算「
 徽章的「來源」欄會標明目前的數字是哪來的：**資訊頁**（現讀）、
 **已校準**（用落後量推算）、**上次紀錄**（快取墊檔，還沒對到新跑批）。
 
+## 順手的預設值
+
+腳本開頭的 `CONFIG` 有兩個開關，不想要就設成 `null`：
+
+| 設定 | 預設 | 作用 |
+| --- | --- | --- |
+| `defaultOverlay` | `"rain"` | 進站自動選降雨圖層。優先呼叫 `W.store.set("overlay", "rain")`，失敗才退回點畫面上的按鈕。**網址已經指定別的圖層**（例如 `windy.com/?wind,25.03,121.56,8`）時不會覆蓋，尊重你點進來的那個連結 |
+| `defaultDetailTab` | `"meteogram"` | 右鍵選「此地點的天氣預報」後，面板一畫好就自動切到 Meteogram 頁籤。用 `MutationObserver` 等面板出現，再從畫面上找出文字是 Meteogram 的頁籤來點 |
+
+找頁籤時會排序候選：`<a>` / `<button>`、class 或 id 帶 `tab`/`btn` 的優先，
+免得誤點到面板裡同名的圖表標題。面板關掉再打開會再切一次，同一次開啟只會點一次。
+
+主控台可以手動試：`__windyUpdateBadge.setOverlay("rain")`、`__windyUpdateBadge.openTab("meteogram")`
+（也可以換成別的圖層代號或頁籤名稱，例如 `setOverlay("wind")`、`openTab("airgram")`）。
+
 ## 壞掉了怎麼辦
 
 主控台可以直接檢查：
@@ -66,6 +84,8 @@ ECMWF 12Z 的跑批大約 +8 小時才發布，所以拿參考時間直接算「
 - 一直顯示「未校準」→ 按「校準」按鈕；若分頁沒自動關，代表 Windy 的資訊頁文字換了格式，
   把 `parseInfoPage()` 的輸出貼出來就能對症調整（要改的只有 `parseInfoPage` 裡那幾條 regex）。
 - 想看每一次抓到什麼 → 把腳本開頭 `CONFIG.debug` 改成 `true` 後重新整理。
+- 圖層或頁籤沒自動切 → `setOverlay()` / `openTab()` 手動跑一次看主控台訊息；
+  Windy 換了 DOM 結構的話，要調的是 `applyDefaultOverlay` 的選擇器與 `findTab` 的評分。
 
 > 校準值只是「發布時間比參考時間晚多久」的估計，來源是 Windy 頁面上以小時為單位的文字，
 > 所以可能有幾分鐘誤差；每進一次資訊頁都會自動重新校準一次。
