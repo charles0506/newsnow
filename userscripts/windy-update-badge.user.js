@@ -2,11 +2,15 @@
 // @name         Windy 更新時間徽章 (Windy Update Badge)
 // @name:en      Windy Update Badge
 // @namespace    https://github.com/charles0506/newsnow
-// @version      2.0.0
+// @version      2.1.0
 // @description  直接在 windy.com 地圖上顯示目前預測模式的「多久前更新」與「下次更新倒數」，不用再打開 /info 資訊頁面。
 // @description:en Show model last-update / next-update countdown directly on the windy.com map, without opening the /info page.
 // @author       charles0506
 // @license      MIT
+// @homepageURL  https://github.com/charles0506/newsnow/tree/claude/windy-update-time-plugin-eci7rt/userscripts
+// @supportURL   https://github.com/charles0506/newsnow/issues
+// @downloadURL  https://raw.githubusercontent.com/charles0506/newsnow/claude/windy-update-time-plugin-eci7rt/userscripts/windy-update-badge.user.js
+// @updateURL    https://raw.githubusercontent.com/charles0506/newsnow/claude/windy-update-time-plugin-eci7rt/userscripts/windy-update-badge.user.js
 // @match        https://www.windy.com/*
 // @match        https://*.windy.com/*
 // @run-at       document-start
