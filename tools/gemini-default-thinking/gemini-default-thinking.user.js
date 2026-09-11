@@ -2,9 +2,9 @@
 // @name         Gemini 預設延伸思考（Default Thinking Mode）
 // @name:en      Gemini Default Thinking Mode
 // @namespace    https://github.com/charles0506/newsnow
-// @version      1.0.0
-// @description  每次開新對話自動把 gemini.google.com 切成「延伸思考」模式，可選擇要一併鎖定的預設模型。內建安全檢查，偵測不到勾選狀態時寧可不動作，絕不會把已開啟的思考模式關掉。
-// @description:en Automatically enables Gemini's "Thinking" mode on every new chat, with optional model lock.
+// @version      1.1.0
+// @description  每次開新對話自動把 gemini.google.com 切成「延伸思考」模式，並讓左側選單預設展開；可選擇一併鎖定預設模型。內建安全檢查，狀態判斷不出來時寧可不動作，絕不會把已開啟的功能反向關掉。
+// @description:en Automatically enables Gemini's "Thinking" mode and keeps the left sidebar expanded, with optional model lock.
 // @author       charles0506
 // @match        https://gemini.google.com/*
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4IiB3aWR0aD0iMTI4IiBoZWlnaHQ9IjEyOCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzQyODVGNCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjQ1JSIgc3RvcC1jb2xvcj0iIzlCNzJDQiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNEOTY1NzAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgPC9kZWZzPgogIDxyZWN0IHg9IjQiIHk9IjQiIHdpZHRoPSIxMjAiIGhlaWdodD0iMTIwIiByeD0iMjgiIGZpbGw9InVybCgjZykiLz4KICA8cGF0aCBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9Ii45NSIKICAgICAgICBkPSJNNjQgMjZjMi42IDE0LjcgMTAuNyAyMi44IDI1LjQgMjUuNEM3NC43IDU0IDY2LjYgNjIuMSA2NCA3Ni44IDYxLjQgNjIuMSA1My4zIDU0IDM4LjYgNTEuNCA1My4zIDQ4LjggNjEuNCA0MC43IDY0IDI2eiIvPgogIDxjaXJjbGUgY3g9IjkzIiBjeT0iOTMiIHI9IjI0IiBmaWxsPSIjZmZmIi8+CiAgPHBhdGggZD0iTTgyIDkzLjVsNy41IDcuNUwxMDUgODUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzFhNzNlOCIgc3Ryb2tlLXdpZHRoPSI3IgogICAgICAgIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDxjaXJjbGUgY3g9IjQxIiBjeT0iOTIiIHI9IjciIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjkiLz4KICA8Y2lyY2xlIGN4PSIyNiIgY3k9IjEwNCIgcj0iNCIgZmlsbD0iI2ZmZiIgZmlsbC1vcGFjaXR5PSIuNyIvPgo8L3N2Zz4K
@@ -23,6 +23,7 @@
   const CFG = {
     enabled:       () => GM_getValue('enabled', true),          // 總開關
     model:         () => GM_getValue('model', ''),              // 想鎖定的模型，例如 "3.1 Pro"；空字串＝不動模型
+    sidebar:       () => GM_getValue('sidebar', true),          // 左側選單預設展開
     toast:         () => GM_getValue('toast', true),            // 右下角提示
     debug:         () => GM_getValue('debug', false),           // 主控台除錯訊息
   };
@@ -50,6 +51,12 @@
   ];
   const MENU_SELECTORS = ['.mat-mdc-menu-panel', '.mat-mdc-menu-content', '[role="menu"]'];
   const ITEM_SELECTORS = ['[role="menuitemradio"]', '[role="menuitemcheckbox"]', '[role="menuitem"]', 'button.mat-mdc-menu-item', '.mat-mdc-menu-item'];
+
+  // 左側選單（側欄）
+  const SIDENAV_SELECTORS = ['bard-sidenav', 'mat-sidenav', '[data-test-id="side-nav"]', '.side-nav-container'];
+  const MENU_WORDS = ['主選單', '主菜單', '主菜单', '選單', '菜单', '導覽', '导航', 'main menu', 'menu', 'navigation'];
+  const SIDEBAR_MIN_WINDOW = 1000;   // 視窗比這窄時側欄是浮動遮罩，展開反而擋內容 → 不動作
+  const SIDEBAR_RAIL_MAX = 140;      // 收合狀態的窄軌大約 72px，展開約 260px 以上
 
   const TIMING = { boot: 1200, afterOpen: 500, afterClick: 900, betweenSteps: 700, poll: 150, timeout: 8000 };
 
@@ -130,11 +137,60 @@
   }
 
   /* ────────────────────────────── 主流程 ────────────────────────────── */
-  const state = { scope: null, done: false, busy: false, userOverride: false, lastPill: '' };
+  const state = { scope: null, done: false, busy: false, userOverride: false, sidebarOverride: false, lastPill: '', lastNavW: 0 };
 
   function scopeOf() {
     const m = location.pathname.match(/\/app\/([^/?#]+)/);
     return m ? m[1] : 'new';
+  }
+
+  /* ───────────────────────── 左側選單預設展開 ───────────────────────── */
+  function getSidenav() {
+    for (const sel of SIDENAV_SELECTORS) { const el = document.querySelector(sel); if (el) return el; }
+    return null;
+  }
+  function sidenavState() {
+    const nav = getSidenav();
+    if (!nav) return 'unknown';
+    const cls = nav.className || '';
+    if (/\b(collapsed|is-collapsed|closed)\b/.test(cls)) return 'collapsed';
+    const w = nav.getBoundingClientRect().width;
+    if (w === 0) return 'hidden';                       // 窄視窗的浮動遮罩模式
+    return w < SIDEBAR_RAIL_MAX ? 'collapsed' : 'expanded';
+  }
+  function findSidenavToggle() {
+    const byId = document.querySelector('[data-test-id="side-nav-menu-button"]');
+    if (byId) { const b = byId.closest('button') || byId.querySelector('button') || byId; if (visible(b)) return b; }
+    for (const b of document.querySelectorAll('button')) {
+      if (!visible(b) || b.getAttribute('aria-haspopup') || b.closest('bard-mode-switcher')) continue;   // 別誤點模型選單
+      const hasMenuIcon = !!b.querySelector('mat-icon[data-mat-icon-name="menu"], mat-icon[fonticon="menu"]')
+        || [...b.querySelectorAll('mat-icon, .material-symbols-outlined, .google-symbols, .material-icons')]
+             .some(i => norm(i.textContent) === 'menu');
+      const label = norm(b.getAttribute('aria-label') || '');
+      if (hasMenuIcon || (label && MENU_WORDS.some(w => label.includes(norm(w))))) return b;
+    }
+    return null;
+  }
+  async function ensureSidebarExpanded() {
+    if (!CFG.sidebar() || state.sidebarOverride) return 'off';
+    if (window.innerWidth < SIDEBAR_MIN_WINDOW) { log('視窗太窄，側欄維持原樣'); return 'narrow'; }
+
+    const before = sidenavState();
+    if (before === 'expanded') { log('側欄已展開'); return 'already'; }
+    if (before === 'unknown') { log('找不到側欄元素，略過'); return 'unknown'; }
+
+    const btn = findSidenavToggle();
+    if (!btn) { log('找不到側欄開關按鈕，略過（不亂點）'); return 'nobutton'; }
+
+    const beforeW = getSidenav().getBoundingClientRect().width;
+    log('展開側欄，點擊：', norm(btn.getAttribute('aria-label') || btn.textContent));
+    btn.click();
+    await sleep(600);
+    const afterW = getSidenav() ? getSidenav().getBoundingClientRect().width : 0;
+    if (afterW > beforeW) return 'clicked';
+    // 沒變寬甚至更窄 → 可能點錯或方向相反，點回去還原，然後放棄
+    if (afterW < beforeW) { warn('側欄反而變窄，還原並放棄。'); btn.click(); await sleep(300); }
+    return 'failed';
   }
 
   async function ensurePreferredModel() {
@@ -196,6 +252,9 @@
       const ok = await waitFor(() => getSwitcher(), TIMING.timeout);
       if (!ok) { log('等不到模型切換按鈕，放棄（', reason, '）'); return; }
 
+      const sb = await ensureSidebarExpanded();
+      if (sb === 'clicked') { log('側欄已展開'); await sleep(300); }
+
       await ensurePreferredModel();
       await sleep(TIMING.betweenSteps);
       let result = await ensureThinking();
@@ -219,6 +278,14 @@
         log('偵測到你手動關閉了延伸思考，本次對話不再自動開啟。');
       }
       state.lastPill = now;
+
+      const nav = getSidenav();
+      const w = nav ? nav.getBoundingClientRect().width : 0;
+      if (state.lastNavW >= SIDEBAR_RAIL_MAX && w > 0 && w < SIDEBAR_RAIL_MAX) {
+        state.sidebarOverride = true;
+        log('偵測到你手動收合側欄，之後不再自動展開（重新整理後恢復）。');
+      }
+      state.lastNavW = w;
     }, 1500);
   }
 
@@ -273,14 +340,17 @@
       const v = prompt('要鎖定哪個模型？輸入選單上看得到的字即可，例如：3.1 Pro / 3.8 Flash / 3.5 Flash-Lite。\n留空＝不改模型，只開延伸思考。', CFG.model());
       if (v !== null) { GM_setValue('model', v.trim()); buildMenu(); toast('已設定預設模型：' + (v.trim() || '不指定')); }
     });
+    add(`${CFG.sidebar() ? '📂' : '📁'} 左側選單預設展開：${CFG.sidebar() ? '開' : '關'}`,
+      () => { GM_setValue('sidebar', !CFG.sidebar()); buildMenu(); toast('左側選單預設展開：' + (!CFG.sidebar() ? '關' : '開')); });
     add(`🔔 提示訊息：${CFG.toast() ? '開' : '關'}`, () => { GM_setValue('toast', !CFG.toast()); buildMenu(); });
     add(`🐞 除錯訊息：${CFG.debug() ? '開' : '關'}`, () => { GM_setValue('debug', !CFG.debug()); buildMenu(); });
-    add('🔁 立刻套用一次', () => { state.done = false; state.userOverride = false; run('manual'); });
+    add('🔁 立刻套用一次', () => { state.done = false; state.userOverride = false; state.sidebarOverride = false; run('manual'); });
   }
 
   /* ─────────────────────────── 啟動 ─────────────────────────── */
   state.scope = scopeOf();
   state.lastPill = getPillText();
+  state.lastNavW = getSidenav() ? getSidenav().getBoundingClientRect().width : 0;
   buildMenu();
   hookHistory();
   watchManualOverride();

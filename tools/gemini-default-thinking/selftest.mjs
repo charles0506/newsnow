@@ -5,7 +5,7 @@ import fs from 'node:fs';
 const CODE = fs.readFileSync(new URL('./gemini-default-thinking.user.js', import.meta.url), 'utf8');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function build({ pill, checkedModel, thinkingOn, useAria = false, breakChecks = false }) {
+function build({ pill, checkedModel, thinkingOn, useAria = false, breakChecks = false, nav, noToggle = false, winWidth }) {
   const dom = new JSDOM(`<!doctype html><html><body>
     <button class="gds-mode-switch-button mat-mdc-button-base" aria-haspopup="menu">
       <span class="logo-pill-label-container"><span>${pill}</span></span>
@@ -55,6 +55,23 @@ function build({ pill, checkedModel, thinkingOn, useAria = false, breakChecks = 
     }
     doc.body.appendChild(menu);
   }
+  // 側欄模擬
+  let navW = nav;
+  if (nav !== undefined) {
+    const navEl = doc.createElement('bard-sidenav');
+    doc.body.appendChild(navEl);
+    navEl.getBoundingClientRect = () => ({ width: navW, height: 600, top: 0, left: 0, right: navW, bottom: 600 });
+    if (!noToggle) {
+      const tb = doc.createElement('button');
+      tb.setAttribute('data-test-id', 'side-nav-menu-button');
+      tb.setAttribute('aria-label', '主選單');
+      tb.textContent = 'menu';
+      tb.addEventListener('click', () => { clicks.push('側欄開關'); navW = navW < 140 ? 280 : 72; });
+      doc.body.appendChild(tb);
+    }
+  }
+  if (winWidth) Object.defineProperty(window, 'innerWidth', { value: winWidth, configurable: true });
+
   doc.querySelector('button.gds-mode-switch-button').addEventListener('click', renderMenu);
   doc.addEventListener('keydown', e => { if (e.key === 'Escape') doc.querySelector('.mat-mdc-menu-panel')?.remove(); });
 
@@ -65,7 +82,7 @@ function build({ pill, checkedModel, thinkingOn, useAria = false, breakChecks = 
     GM_registerMenuCommand: () => 1,
     GM_unregisterMenuCommand: () => {},
   });
-  return { window, doc, clicks, state, store };
+  return { window, doc, clicks, state, store, getNavW: () => navW };
 }
 
 const results = [];
@@ -75,10 +92,14 @@ async function scenario(name, opts, expect) {
   env.window.eval(CODE);
   await sleep(opts.wait || 5200);
   const got = { clicks: env.clicks.join(','), thinking: env.state.thinking, model: env.state.model };
-  const ok = got.clicks === expect.clicks && got.thinking === expect.thinking && got.model === expect.model;
+  if (expect.navW !== undefined) got.navW = env.getNavW();
+  const ok = got.clicks === expect.clicks && got.thinking === expect.thinking && got.model === expect.model
+    && (expect.navW === undefined || got.navW === expect.navW);
   results.push(ok);
   console.log(`${ok ? '✅' : '❌'} ${name}`);
-  console.log(`   點擊=[${got.clicks}] 思考=${got.thinking} 模型=${got.model}  (預期 點擊=[${expect.clicks}] 思考=${expect.thinking} 模型=${expect.model})`);
+  const nw = expect.navW === undefined ? '' : ` 側欄寬=${got.navW}`;
+  const nwE = expect.navW === undefined ? '' : ` 側欄寬=${expect.navW}`;
+  console.log(`   點擊=[${got.clicks}] 思考=${got.thinking} 模型=${got.model}${nw}  (預期 點擊=[${expect.clicks}] 思考=${expect.thinking} 模型=${expect.model}${nwE})`);
   env.window.close();
 }
 
@@ -106,6 +127,26 @@ await scenario('E 改版導致勾選偵測失效 → 安全煞車，一次都不
 await scenario('F 鎖定 3.1 Pro + 思考關閉 → 先換模型再開思考',
   { pill: 'Flash', checkedModel: '3.8 Flash', thinkingOn: false, cfgModel: '3.1 Pro', wait: 6500 },
   { clicks: '3.1 Pro,延伸思考', thinking: true, model: '3.1 Pro' });
+
+await scenario('G 側欄收合 → 自動展開',
+  { pill: 'Flash 延伸', checkedModel: '3.8 Flash', thinkingOn: true, nav: 72, wait: 6000 },
+  { clicks: '側欄開關', thinking: true, model: '3.8 Flash', navW: 280 });
+
+await scenario('H 側欄已展開 → 一下都不點（不會反而收起來）',
+  { pill: 'Flash 延伸', checkedModel: '3.8 Flash', thinkingOn: true, nav: 280, wait: 6000 },
+  { clicks: '', thinking: true, model: '3.8 Flash', navW: 280 });
+
+await scenario('I 視窗過窄（900px）→ 側欄維持原樣，避免浮動遮罩擋內容',
+  { pill: 'Flash 延伸', checkedModel: '3.8 Flash', thinkingOn: true, nav: 72, winWidth: 900, wait: 6000 },
+  { clicks: '', thinking: true, model: '3.8 Flash', navW: 72 });
+
+await scenario('J 找不到側欄開關 → 不亂點別的按鈕',
+  { pill: 'Flash 延伸', checkedModel: '3.8 Flash', thinkingOn: true, nav: 72, noToggle: true, wait: 6000 },
+  { clicks: '', thinking: true, model: '3.8 Flash', navW: 72 });
+
+await scenario('K 側欄收合 + 思考關閉 → 兩件事都做',
+  { pill: 'Flash', checkedModel: '3.8 Flash', thinkingOn: false, nav: 72, wait: 7000 },
+  { clicks: '側欄開關,延伸思考', thinking: true, model: '3.8 Flash', navW: 280 });
 
 const pass = results.filter(Boolean).length;
 console.log(`\n結果：${pass}/${results.length} 通過`);
