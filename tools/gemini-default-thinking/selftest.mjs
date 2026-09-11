@@ -5,7 +5,7 @@ import fs from 'node:fs';
 const CODE = fs.readFileSync(new URL('./gemini-default-thinking.user.js', import.meta.url), 'utf8');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function build({ pill, checkedModel, thinkingOn, useAria = false, breakChecks = false, nav, noToggle = false, winWidth }) {
+function build({ pill, checkedModel, thinkingOn, useAria = false, breakChecks = false, nav, noToggle = false, winWidth, navSections = false }) {
   const dom = new JSDOM(`<!doctype html><html><body>
     <button class="gds-mode-switch-button mat-mdc-button-base" aria-haspopup="menu">
       <span class="logo-pill-label-container"><span>${pill}</span></span>
@@ -61,6 +61,17 @@ function build({ pill, checkedModel, thinkingOn, useAria = false, breakChecks = 
     const navEl = doc.createElement('bard-sidenav');
     doc.body.appendChild(navEl);
     navEl.getBoundingClientRect = () => ({ width: navW, height: 600, top: 0, left: 0, right: navW, bottom: 600 });
+    if (navSections) {
+      navEl.innerHTML = `<div class="nav-list">
+        <div class="row" id="r-new"><span>新對話</span></div>
+        <div class="section-title" id="t-note"><span>筆記本</span></div>
+        <div class="row" id="n1">新增筆記本</div>
+        <div class="row" id="n2">熱量營養</div>
+        <div class="row" id="n3">每日運動</div>
+        <div class="section-title" id="t-recent"><span>近期對話</span></div>
+        <div class="row" id="c1">2026年慰勞休假統計</div>
+      </div>`;
+    }
     if (!noToggle) {
       const tb = doc.createElement('button');
       tb.setAttribute('data-test-id', 'side-nav-menu-button');
@@ -89,16 +100,21 @@ const results = [];
 async function scenario(name, opts, expect) {
   const env = build(opts);
   if (opts.cfgModel) env.store.model = opts.cfgModel;
+  if (opts.cfgNavWidth) env.store.navWidth = opts.cfgNavWidth;
+  if (opts.cfgSections) env.store.sections = opts.cfgSections;
   env.window.eval(CODE);
   await sleep(opts.wait || 5200);
   const got = { clicks: env.clicks.join(','), thinking: env.state.thinking, model: env.state.model };
   if (expect.navW !== undefined) got.navW = env.getNavW();
-  const ok = got.clicks === expect.clicks && got.thinking === expect.thinking && got.model === expect.model
+  if (expect.probe) Object.assign(got, expect.probe(env));
+  let ok = got.clicks === expect.clicks && got.thinking === expect.thinking && got.model === expect.model
     && (expect.navW === undefined || got.navW === expect.navW);
+  if (expect.check) { const r = expect.check(env); ok = ok && r.ok; got.detail = r.detail; }
   results.push(ok);
   console.log(`${ok ? '✅' : '❌'} ${name}`);
   const nw = expect.navW === undefined ? '' : ` 側欄寬=${got.navW}`;
   const nwE = expect.navW === undefined ? '' : ` 側欄寬=${expect.navW}`;
+  if (got.detail) console.log('   ' + got.detail);
   console.log(`   點擊=[${got.clicks}] 思考=${got.thinking} 模型=${got.model}${nw}  (預期 點擊=[${expect.clicks}] 思考=${expect.thinking} 模型=${expect.model}${nwE})`);
   env.window.close();
 }
@@ -147,6 +163,33 @@ await scenario('J 找不到側欄開關 → 不亂點別的按鈕',
 await scenario('K 側欄收合 + 思考關閉 → 兩件事都做',
   { pill: 'Flash', checkedModel: '3.8 Flash', thinkingOn: false, nav: 72, wait: 7000 },
   { clicks: '側欄開關,延伸思考', thinking: true, model: '3.8 Flash', navW: 280 });
+
+await scenario('L 自訂側欄寬度 320px → 注入 CSS',
+  { pill: 'Flash 延伸', checkedModel: '3.8 Flash', thinkingOn: true, nav: 280, cfgNavWidth: 320, wait: 6000 },
+  { clicks: '', thinking: true, model: '3.8 Flash',
+    check: env => { const css = env.doc.getElementById('gdt-nav-width')?.textContent || '';
+      return { ok: css.includes('320px'), detail: '注入 CSS 含 320px：' + css.includes('320px') }; } });
+
+await scenario('M 寬度超出範圍 9999 → 夾到上限 560px',
+  { pill: 'Flash 延伸', checkedModel: '3.8 Flash', thinkingOn: true, nav: 280, cfgNavWidth: 9999, wait: 6000 },
+  { clicks: '', thinking: true, model: '3.8 Flash',
+    check: env => { const css = env.doc.getElementById('gdt-nav-width')?.textContent || '';
+      return { ok: css.includes('560px') && !css.includes('9999'), detail: '夾到 560px：' + css.includes('560px') }; } });
+
+await scenario('N 收合「筆記本」區塊 → 只藏該區塊，近期對話不受影響',
+  { pill: 'Flash 延伸', checkedModel: '3.8 Flash', thinkingOn: true, nav: 280, navSections: true, cfgSections: ['筆記本'], wait: 6000 },
+  { clicks: '', thinking: true, model: '3.8 Flash',
+    check: env => { const d = env.doc;
+      const hidden = ['n1','n2','n3'].every(id => d.getElementById(id).style.display === 'none');
+      const kept = d.getElementById('c1').style.display !== 'none' && d.getElementById('r-new').style.display !== 'none';
+      return { ok: hidden && kept, detail: `筆記本三項已隱藏=${hidden}，近期對話/新對話保留=${kept}` }; } });
+
+await scenario('O 摺疊箭頭注入到兩個區塊標題，狀態圖示正確',
+  { pill: 'Flash 延伸', checkedModel: '3.8 Flash', thinkingOn: true, nav: 280, navSections: true, cfgSections: ['筆記本'], wait: 6000 },
+  { clicks: '', thinking: true, model: '3.8 Flash',
+    check: env => { const d = env.doc;
+      const carets = [...d.querySelectorAll('.gdt-caret')].map(c => c.textContent);
+      return { ok: carets.length === 2 && carets[0] === '▸' && carets[1] === '▾', detail: '箭頭：' + carets.join(' / ') }; } });
 
 const pass = results.filter(Boolean).length;
 console.log(`\n結果：${pass}/${results.length} 通過`);

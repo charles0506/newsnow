@@ -2,12 +2,14 @@
 // @name         Gemini 預設延伸思考（Default Thinking Mode）
 // @name:en      Gemini Default Thinking Mode
 // @namespace    https://github.com/charles0506/newsnow
-// @version      1.1.0
+// @version      1.2.0
 // @description  每次開新對話自動把 gemini.google.com 切成「延伸思考」模式，並讓左側選單預設展開；可選擇一併鎖定預設模型。內建安全檢查，狀態判斷不出來時寧可不動作，絕不會把已開啟的功能反向關掉。
 // @description:en Automatically enables Gemini's "Thinking" mode and keeps the left sidebar expanded, with optional model lock.
 // @author       charles0506
 // @match        https://gemini.google.com/*
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMjggMTI4IiB3aWR0aD0iMTI4IiBoZWlnaHQ9IjEyOCI+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9ImciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwJSIgc3RvcC1jb2xvcj0iIzQyODVGNCIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjQ1JSIgc3RvcC1jb2xvcj0iIzlCNzJDQiIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNEOTY1NzAiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgPC9kZWZzPgogIDxyZWN0IHg9IjQiIHk9IjQiIHdpZHRoPSIxMjAiIGhlaWdodD0iMTIwIiByeD0iMjgiIGZpbGw9InVybCgjZykiLz4KICA8cGF0aCBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9Ii45NSIKICAgICAgICBkPSJNNjQgMjZjMi42IDE0LjcgMTAuNyAyMi44IDI1LjQgMjUuNEM3NC43IDU0IDY2LjYgNjIuMSA2NCA3Ni44IDYxLjQgNjIuMSA1My4zIDU0IDM4LjYgNTEuNCA1My4zIDQ4LjggNjEuNCA0MC43IDY0IDI2eiIvPgogIDxjaXJjbGUgY3g9IjkzIiBjeT0iOTMiIHI9IjI0IiBmaWxsPSIjZmZmIi8+CiAgPHBhdGggZD0iTTgyIDkzLjVsNy41IDcuNUwxMDUgODUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzFhNzNlOCIgc3Ryb2tlLXdpZHRoPSI3IgogICAgICAgIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDxjaXJjbGUgY3g9IjQxIiBjeT0iOTIiIHI9IjciIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iLjkiLz4KICA8Y2lyY2xlIGN4PSIyNiIgY3k9IjEwNCIgcj0iNCIgZmlsbD0iI2ZmZiIgZmlsbC1vcGFjaXR5PSIuNyIvPgo8L3N2Zz4K
+// @downloadURL  https://raw.githubusercontent.com/charles0506/newsnow/refs/heads/claude/confident-wright-2vek02/tools/gemini-default-thinking/gemini-default-thinking.user.js
+// @updateURL    https://raw.githubusercontent.com/charles0506/newsnow/refs/heads/claude/confident-wright-2vek02/tools/gemini-default-thinking/gemini-default-thinking.user.js
 // @run-at       document-idle
 // @noframes
 // @grant        GM_getValue
@@ -24,6 +26,10 @@
     enabled:       () => GM_getValue('enabled', true),          // 總開關
     model:         () => GM_getValue('model', ''),              // 想鎖定的模型，例如 "3.1 Pro"；空字串＝不動模型
     sidebar:       () => GM_getValue('sidebar', true),          // 左側選單預設展開
+    navWidth:      () => GM_getValue('navWidth', 0),            // 側欄寬度（px）；0 ＝跟隨 Gemini 預設
+    resizer:       () => GM_getValue('resizer', true),          // 側欄右緣可拖曳調寬
+    sections:      () => GM_getValue('sections', []),           // 要預設收合的側欄區塊標題
+    sectionUI:     () => GM_getValue('sectionUI', true),        // 在區塊標題旁注入摺疊箭頭
     toast:         () => GM_getValue('toast', true),            // 右下角提示
     debug:         () => GM_getValue('debug', false),           // 主控台除錯訊息
   };
@@ -57,6 +63,9 @@
   const MENU_WORDS = ['主選單', '主菜單', '主菜单', '選單', '菜单', '導覽', '导航', 'main menu', 'menu', 'navigation'];
   const SIDEBAR_MIN_WINDOW = 1000;   // 視窗比這窄時側欄是浮動遮罩，展開反而擋內容 → 不動作
   const SIDEBAR_RAIL_MAX = 140;      // 收合狀態的窄軌大約 72px，展開約 260px 以上
+  const NAV_W_MIN = 200, NAV_W_MAX = 560;
+  // 可摺疊的側欄區塊標題（完全相符才算，避免誤判對話標題）
+  const SECTION_TITLES = ['筆記本', '筆記本清單', 'Notebooks', 'Gem', 'Gems', '近期對話', '最近的對話', 'Recent', 'Recent chats'];
 
   const TIMING = { boot: 1200, afterOpen: 500, afterClick: 900, betweenSteps: 700, poll: 150, timeout: 8000 };
 
@@ -193,6 +202,142 @@
     return 'failed';
   }
 
+  /* ───────────────────── 側欄寬度：自訂 + 拖曳調整 ───────────────────── */
+  const clampW = w => Math.min(NAV_W_MAX, Math.max(NAV_W_MIN, Math.round(w)));
+
+  function applyNavWidth() {
+    const want = CFG.navWidth();
+    const id = 'gdt-nav-width';
+    let style = document.getElementById(id);
+    // 只有在側欄「展開」時才套用，收合的窄軌不能被撐開
+    const ok = want && sidenavState() === 'expanded';
+    if (!ok) { if (style) style.remove(); return; }
+    const w = clampW(want);
+    if (!style) { style = document.createElement('style'); style.id = id; (document.head || document.documentElement).appendChild(style); }
+    const css = `bard-sidenav, bard-sidenav > .sidenav-container, bard-sidenav mat-sidenav, mat-sidenav.mat-drawer {
+      width: ${w}px !important; min-width: ${w}px !important; max-width: ${w}px !important; }`;
+    if (style.textContent !== css) style.textContent = css;
+  }
+
+  function installResizer() {
+    if (!CFG.resizer() || document.getElementById('gdt-resizer')) return;
+    const nav = getSidenav();
+    if (!nav || sidenavState() !== 'expanded') return;
+
+    const bar = document.createElement('div');
+    bar.id = 'gdt-resizer';
+    Object.assign(bar.style, {
+      position: 'fixed', top: '0', bottom: '0', width: '6px', zIndex: 2147483646,
+      cursor: 'col-resize', background: 'transparent',
+    });
+    const place = () => { const r = getSidenav()?.getBoundingClientRect(); if (r) bar.style.left = (r.right - 3) + 'px'; };
+    place();
+    bar.addEventListener('mouseenter', () => { bar.style.background = 'rgba(155,114,203,.45)'; });
+    bar.addEventListener('mouseleave', () => { if (!bar.dataset.dragging) bar.style.background = 'transparent'; });
+    bar.addEventListener('mousedown', e => {
+      e.preventDefault(); bar.dataset.dragging = '1'; bar.style.background = 'rgba(155,114,203,.75)';
+      const move = ev => { GM_setValue('navWidth', clampW(ev.clientX)); applyNavWidth(); place(); };
+      const up = () => {
+        delete bar.dataset.dragging; bar.style.background = 'transparent';
+        document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+        toast('側欄寬度：' + clampW(CFG.navWidth()) + ' px');
+      };
+      document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+    });
+    document.body.appendChild(bar);
+    window.addEventListener('resize', place);
+    setInterval(place, 1500);
+  }
+
+  /* ───────────────────── 側欄區塊摺疊（筆記本 / Gem / 近期對話）───────────────────── */
+  const sectionSet = () => new Set(CFG.sections());
+  // 比對文字時要把自己注入的箭頭去掉，否則第二輪會把同一列認成不同節點、重複注入
+  const CARET_RE = /[▾▸]/g;
+  const cleanText = el => ((el.textContent || '').replace(CARET_RE, '')).trim();
+  const firstLineOf = el => (((el.innerText || el.textContent || '').replace(CARET_RE, '')).trim().split('\n')[0] || '').trim();
+  const isTitle = t => !!t && SECTION_TITLES.some(w => norm(w) === norm(t));
+
+  function sectionHeaders() {
+    const nav = getSidenav();
+    if (!nav) return [];
+    const found = [];
+    for (const el of nav.querySelectorAll('div, span, h1, h2, h3, h4, p, label')) {
+      if (el.classList.contains('gdt-caret')) continue;
+      if ([...el.children].some(c => !c.classList.contains('gdt-caret'))) continue;   // 只挑純文字節點
+      const t = cleanText(el);
+      if (!isTitle(t)) continue;
+      let row = el;                                           // 往上找出代表「這一列」的容器
+      while (row.parentElement && row.parentElement !== nav && cleanText(row.parentElement) === t) row = row.parentElement;
+      if (row.parentElement && !found.some(f => f.row === row)) found.push({ title: t, row });
+    }
+    return found;
+  }
+
+  function sectionItems(h) {
+    const items = [];
+    let n = h.row.nextElementSibling;
+    while (n) { if (isTitle(firstLineOf(n))) break; items.push(n); n = n.nextElementSibling; }
+    if (!items.length) {                                      // 標題自成一個容器的版面
+      const sib = h.row.parentElement && h.row.parentElement.nextElementSibling;
+      if (sib && !isTitle(firstLineOf(sib))) items.push(sib);
+    }
+    return items;
+  }
+
+  function applySections() {
+    if (!CFG.sectionUI() && !CFG.sections().length) return;
+    const collapsed = sectionSet();
+    for (const h of sectionHeaders()) {
+      const hide = collapsed.has(h.title);
+      for (const it of sectionItems(h)) {
+        if (hide) { if (it.style.display !== 'none') { it.dataset.gdtHidden = '1'; it.style.display = 'none'; } }
+        else if (it.dataset.gdtHidden) { delete it.dataset.gdtHidden; it.style.display = ''; }
+      }
+      if (CFG.sectionUI()) injectCaret(h, hide);
+    }
+  }
+
+  function injectCaret(h, hidden) {
+    let caret = h.row.querySelector('.gdt-caret');
+    if (!caret) {
+      caret = document.createElement('span');
+      caret.className = 'gdt-caret';
+      caret.title = '收合／展開這個區塊';
+      Object.assign(caret.style, { cursor: 'pointer', marginInlineStart: '6px', opacity: '.65', fontSize: '11px', userSelect: 'none' });
+      caret.addEventListener('click', e => {
+        e.stopPropagation(); e.preventDefault();
+        const list = CFG.sections().slice();
+        const i = list.indexOf(h.title);
+        if (i >= 0) list.splice(i, 1); else list.push(h.title);
+        GM_setValue('sections', list);
+        applySections();
+      });
+      h.row.appendChild(caret);
+    }
+    const want = hidden ? '▸' : '▾';
+    if (caret.textContent !== want) caret.textContent = want;
+  }
+
+  /* ───────────────────── 除錯：傾印側欄結構 ───────────────────── */
+  function dumpSidenav() {
+    const nav = getSidenav();
+    if (!nav) { console.warn('[Gemini 延伸思考] 找不到側欄元素'); return; }
+    const rows = [];
+    const walk = (el, depth) => {
+      if (depth > 6) return;
+      for (const c of el.children) {
+        const t = (c.textContent || '').trim().slice(0, 24);
+        rows.push({ 深度: depth, 標籤: c.tagName.toLowerCase(), class: (c.className || '').toString().slice(0, 48), 文字: t, 寬: Math.round(c.getBoundingClientRect().width) });
+        walk(c, depth + 1);
+      }
+    };
+    walk(nav, 0);
+    console.log('%c[Gemini 延伸思考] 側欄結構（把這張表截圖回報即可）', 'color:#9B72CB;font-weight:bold');
+    console.table(rows.slice(0, 120));
+    console.log('偵測到的區塊標題：', sectionHeaders().map(h => h.title));
+    console.log('側欄狀態：', sidenavState(), '寬度：', Math.round(nav.getBoundingClientRect().width));
+  }
+
   async function ensurePreferredModel() {
     const want = (CFG.model() || '').trim();
     if (!want) return true;
@@ -254,6 +399,7 @@
 
       const sb = await ensureSidebarExpanded();
       if (sb === 'clicked') { log('側欄已展開'); await sleep(300); }
+      applyNavWidth(); installResizer(); applySections();
 
       await ensurePreferredModel();
       await sleep(TIMING.betweenSteps);
@@ -286,6 +432,8 @@
         log('偵測到你手動收合側欄，之後不再自動展開（重新整理後恢復）。');
       }
       state.lastNavW = w;
+
+      applyNavWidth(); installResizer(); applySections();
     }, 1500);
   }
 
@@ -342,6 +490,25 @@
     });
     add(`${CFG.sidebar() ? '📂' : '📁'} 左側選單預設展開：${CFG.sidebar() ? '開' : '關'}`,
       () => { GM_setValue('sidebar', !CFG.sidebar()); buildMenu(); toast('左側選單預設展開：' + (!CFG.sidebar() ? '關' : '開')); });
+    add(`📐 側欄寬度：${CFG.navWidth() ? clampW(CFG.navWidth()) + ' px' : '跟隨 Gemini'}（點擊修改）`, () => {
+      const v = prompt(`側欄寬度（${NAV_W_MIN}–${NAV_W_MAX} px）。輸入 0 或留空＝跟隨 Gemini 預設。\n也可以直接用滑鼠拖曳側欄右緣調整。`, CFG.navWidth() || '');
+      if (v === null) return;
+      const n = parseInt(v, 10);
+      GM_setValue('navWidth', !n || isNaN(n) ? 0 : clampW(n));
+      applyNavWidth(); buildMenu();
+      toast('側欄寬度：' + (CFG.navWidth() ? CFG.navWidth() + ' px' : '跟隨 Gemini'));
+    });
+    add(`↔️ 拖曳調整側欄寬度：${CFG.resizer() ? '開' : '關'}`, () => {
+      GM_setValue('resizer', !CFG.resizer()); buildMenu();
+      document.getElementById('gdt-resizer')?.remove(); installResizer();
+    });
+    add(`🗂 側欄區塊摺疊箭頭：${CFG.sectionUI() ? '開' : '關'}${CFG.sections().length ? '（已收合：' + CFG.sections().join('、') + '）' : ''}`, () => {
+      GM_setValue('sectionUI', !CFG.sectionUI()); buildMenu();
+      if (!CFG.sectionUI()) document.querySelectorAll('.gdt-caret').forEach(c => c.remove());
+      applySections();
+    });
+    add('↩️ 全部區塊展開', () => { GM_setValue('sections', []); applySections(); buildMenu(); toast('已展開所有側欄區塊'); });
+    add('🧪 傾印側欄結構（開發者除錯）', dumpSidenav);
     add(`🔔 提示訊息：${CFG.toast() ? '開' : '關'}`, () => { GM_setValue('toast', !CFG.toast()); buildMenu(); });
     add(`🐞 除錯訊息：${CFG.debug() ? '開' : '關'}`, () => { GM_setValue('debug', !CFG.debug()); buildMenu(); });
     add('🔁 立刻套用一次', () => { state.done = false; state.userOverride = false; state.sidebarOverride = false; run('manual'); });
