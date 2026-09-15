@@ -25,8 +25,10 @@
 ## 安裝
 
 1. 瀏覽器裝 [Violentmonkey（暴力猴）](https://violentmonkey.github.io/) 或 Tampermonkey。
-2. 開啟擴充功能的「新增腳本」，把 `windy-update-badge.user.js` 全文貼上並儲存。
-   （或在檔案總管把 `.user.js` 拖進瀏覽器視窗，暴力猴會跳出安裝畫面。）
+2. 開啟這個連結，暴力猴就會跳出安裝畫面：
+   <https://raw.githubusercontent.com/charles0506/newsnow/main/userscripts/windy-update-badge.user.js>
+   （腳本帶 `@updateURL`，之後按「檢查更新」就能升級。也可以把 `.user.js` 全文貼進
+   擴充功能的「新增腳本」手動安裝。）
 3. 重新整理 <https://www.windy.com>，右上角會出現徽章。
 
 操作：**拖曳**可搬到任何位置（位置會記住），**單擊**可收合／展開詳細資料。
