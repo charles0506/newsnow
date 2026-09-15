@@ -2,7 +2,7 @@
 // @name         Windy 更新時間徽章 (Windy Update Badge)
 // @name:en      Windy Update Badge
 // @namespace    https://github.com/charles0506/newsnow
-// @version      2.1.0
+// @version      2.2.0
 // @description  直接在 windy.com 地圖上顯示目前預測模式的「多久前更新」與「下次更新倒數」，不用再打開 /info 資訊頁面。
 // @description:en Show model last-update / next-update countdown directly on the windy.com map, without opening the /info page.
 // @author       charles0506
@@ -136,6 +136,33 @@
   //   更新間隔: 12 - 13 hrs                → 間隔範圍
   //   參考時間: 2026-08-31T12:00:00Z       → 參考時間
   // ---------------------------------------------------------------------------
+  // 解析「1 小時 38 分鐘前」「5 小時前」「38 分鐘前」「1 hour 38 minutes ago」
+  // 回傳 { ms, precise }；precise 代表有講到分鐘，準確度到分而不是到小時
+  function parseAgo(segment) {
+    if (!segment) return null
+
+    let hours = null
+    let minutes = null
+    const unlabeled = []
+
+    for (const [, num, tail] of segment.matchAll(/(\d+)\s*([^\d]{0,6})/g)) {
+      const n = Number(num)
+      if (/小時|小时|時|时|hour|hr|h/i.test(tail)) hours = (hours ?? 0) + n
+      else if (/分|minute|min|m/i.test(tail)) minutes = (minutes ?? 0) + n
+      else unlabeled.push(n)
+    }
+
+    // 看不懂單位時，照「時、分」的順序認
+    if (hours == null && minutes == null && unlabeled.length) {
+      hours = unlabeled[0]
+      if (unlabeled.length > 1) minutes = unlabeled[1]
+    }
+    if (hours == null && minutes == null) return null
+    if (hours > 240 || minutes > 59) return null // 解析歪了就不要用
+
+    return { ms: (hours || 0) * HOUR + (minutes || 0) * 60_000, precise: minutes != null }
+  }
+
   function parseInfoPage(text) {
     if (!text) return null
 
@@ -143,9 +170,10 @@
     const refTime = isoMatch ? toMs(isoMatch[0]) : null
     if (!isSaneTime(refTime)) return null
 
-    // 「5 小時前 (ref 12Z)」/「5 hours ago (ref 12Z)」：抓 "(ref" 前面最近的那個數字
-    const agoMatch = /(\d+)[^\d()]{0,12}\(\s*ref\s*(\d{1,2})Z\s*\)/i.exec(text)
-    const hoursAgo = agoMatch ? Number(agoMatch[1]) : null
+    // 「5 小時前 (ref 12Z)」「1 小時 38 分鐘前 (ref 12Z)」「1 hour 38 minutes ago (ref 12Z)」
+    // 取 "(ref" 前面那一整段來解析，不能只抓最近的數字（不然 38 分會被當成 38 小時）
+    const agoMatch = /([^\n]{0,40}?)\(\s*ref\s*(\d{1,2})Z\s*\)/i.exec(text)
+    const ago = agoMatch ? parseAgo(agoMatch[1]) : null
 
     // 倒數「7h 58m 57s」。一定要有秒，才不會誤抓高級版廣告裡的「1h 58m」
     const cdMatch = /(?:(\d+)\s*h\s*)?(\d+)\s*m\s*(\d+)\s*s/i.exec(text)
@@ -168,22 +196,34 @@
 
     const nextUpdate = countdownMs != null ? Date.now() + countdownMs : null
 
-    // 用「下次更新 − 間隔」回推發布時間，挑出跟「N 小時前」對得起來的那個間隔
     let lastUpdate = null
     let intervalMs = null
-    if (nextUpdate) {
+
+    // 最好的狀況：「N 小時 M 分鐘前」精確到分，發布時間直接算得出來，
+    // 間隔也不必用猜的 —— 下次更新減發布時間就是了
+    if (ago?.precise) {
+      lastUpdate = Date.now() - ago.ms
+      if (nextUpdate) {
+        const hours = Math.round((nextUpdate - lastUpdate) / HOUR)
+        if (hours > 0 && hours <= 48) intervalMs = hours * HOUR
+      }
+    }
+
+    // 只有「N 小時前」時：用「下次更新 − 間隔」回推，挑出對得起來的那個間隔
+    if (lastUpdate == null && nextUpdate) {
       for (const h of candidates) {
         const candidate = nextUpdate - h * HOUR
-        if (hoursAgo == null || Math.floor((Date.now() - candidate) / HOUR) === hoursAgo) {
+        if (!ago || Math.floor((Date.now() - candidate) / HOUR) === Math.floor(ago.ms / HOUR)) {
           lastUpdate = candidate
           intervalMs = h * HOUR
           break
         }
       }
     }
-    // 對不起來就退而求其次：用「N 小時前」的中位數當發布時間
-    if (lastUpdate == null && hoursAgo != null) {
-      lastUpdate = Date.now() - (hoursAgo * 60 + 30) * 60_000
+
+    // 都對不起來就退而求其次：用「N 小時前」的中位數當發布時間
+    if (lastUpdate == null && ago) {
+      lastUpdate = Date.now() - ago.ms - (ago.precise ? 0 : 30 * 60_000)
       if (candidates.length) intervalMs = candidates[0] * HOUR
     }
     if (lastUpdate == null) return null
@@ -463,6 +503,7 @@
     const mins = Math.floor(diff / 60_000)
     if (mins < 60) return `${mins} 分鐘前`
     const hours = Math.floor(mins / 60)
+    if (hours < 2) return `${hours} 小時 ${mins % 60} 分鐘前`
     if (hours < 48) return `${hours} 小時前`
     return `${Math.floor(hours / 24)} 天前`
   }
