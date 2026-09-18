@@ -64,13 +64,27 @@ ECMWF 12Z 的跑批大約 +8 小時才發布，所以拿參考時間直接算「
 | 設定 | 預設 | 作用 |
 | --- | --- | --- |
 | `defaultOverlay` | `"rain"` | 進站自動選降雨圖層。優先呼叫 `W.store.set("overlay", "rain")`，失敗才退回點畫面上的按鈕。**網址已經指定別的圖層**（例如 `windy.com/?wind,25.03,121.56,8`）時不會覆蓋，尊重你點進來的那個連結 |
-| `defaultDetailTab` | `"meteogram"` | 右鍵選「此地點的天氣預報」後，面板一畫好就自動切到 Meteogram 頁籤。用 `MutationObserver` 等面板出現，再從畫面上找出文字是 Meteogram 的頁籤來點 |
+| `autoTabs` | 見下 | 面板一畫好就自動點好指定的頁籤。用 `MutationObserver` 等面板出現，再從畫面上找出文字相符的頁籤來點 |
+
+`autoTabs` 是一張由上往下比對的規則表，`path` 命中網址就用那條，省略 `path` 的是「其他頁面」：
+
+```js
+autoTabs: [
+  { path: "/multimodel", label: "Clouds.Rain" }, // 比較不同預報模式
+  { label: "Meteogram" },                        // 此地點的天氣預報
+],
+```
+
+因為只有第一條命中的規則會生效，在 `/multimodel` 上就只會點 Clouds.Rain，不會去碰 Meteogram。
+Windy 是單頁應用，切頁只改 path 不重新載入，所以每次 DOM 有變動都會重新比對規則。
+頁籤文字（`Meteogram`、`Clouds.Rain`）在中文介面下也是英文，所以不受語言影響；`label` 裡的 `.` 會當字面比對。
 
 找頁籤時會排序候選：`<a>` / `<button>`、class 或 id 帶 `tab`/`btn` 的優先，
 免得誤點到面板裡同名的圖表標題。面板關掉再打開會再切一次，同一次開啟只會點一次。
 
-主控台可以手動試：`__windyUpdateBadge.setOverlay("rain")`、`__windyUpdateBadge.openTab("meteogram")`
-（也可以換成別的圖層代號或頁籤名稱，例如 `setOverlay("wind")`、`openTab("airgram")`）。
+主控台可以手動試：`__windyUpdateBadge.setOverlay("rain")`、`__windyUpdateBadge.openTab()`
+（`openTab()` 不給參數就用目前網址命中的規則，也可以指定名稱，例如 `openTab("Clouds.Rain")`；
+`__windyUpdateBadge.tabRule()` 可以看現在命中哪一條規則）。
 
 ## 壞掉了怎麼辦
 
@@ -90,6 +104,7 @@ ECMWF 12Z 的跑批大約 +8 小時才發布，所以拿參考時間直接算「
 - 想看每一次抓到什麼 → 把腳本開頭 `CONFIG.debug` 改成 `true` 後重新整理。
 - 圖層或頁籤沒自動切 → `setOverlay()` / `openTab()` 手動跑一次看主控台訊息；
   Windy 換了 DOM 結構的話，要調的是 `applyDefaultOverlay` 的選擇器與 `findTab` 的評分。
+- 想再加一個頁面的預設頁籤 → 在 `autoTabs` 最前面加一條 `{ path: "/xxx", label: "…" }` 就好。
 
 > 校準值只是「發布時間比參考時間晚多久」的估計，來源是 Windy 頁面上以小時為單位的文字，
 > 所以可能有幾分鐘誤差；每進一次資訊頁都會自動重新校準一次。

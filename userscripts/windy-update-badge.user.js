@@ -2,7 +2,7 @@
 // @name         Windy 更新時間徽章 (Windy Update Badge)
 // @name:en      Windy Update Badge
 // @namespace    https://github.com/charles0506/newsnow
-// @version      2.2.1
+// @version      2.3.0
 // @description  直接在 windy.com 地圖上顯示目前預測模式的「多久前更新」與「下次更新倒數」，不用再打開 /info 資訊頁面。
 // @description:en Show model last-update / next-update countdown directly on the windy.com map, without opening the /info page.
 // @author       charles0506
@@ -43,8 +43,13 @@
     calibrateTimeoutMs: 25_000,
     // 進站時自動選好的圖層（Windy 的 overlay 代號）。設成 null 就不要動它
     defaultOverlay: "rain",
-    // 「此地點的天氣預報」面板打開時自動切到的頁籤（比對頁籤文字）。設成 null 就不要動它
-    defaultDetailTab: "meteogram",
+    // 面板打開時自動點好的頁籤（比對頁籤上的文字，與介面語言無關）。
+    // 由上往下比對 path，第一個命中的規則生效；path 省略代表「其他頁面」。
+    // 整個設成 [] 就不要動任何頁籤。
+    autoTabs: [
+      { path: "/multimodel", label: "Clouds.Rain" }, // 比較不同預報模式
+      { label: "Meteogram" }, // 此地點的天氣預報
+    ],
   }
 
   const KEY = {
@@ -718,12 +723,13 @@
     }
   }
 
-  // 面板關掉再打開時要能再切一次，所以用「面板還在不在」來決定要不要重置
-  let detailTabDone = false
+  // 面板關掉再打開時要能再切一次，所以用「頁籤還在不在」來決定要不要重置
+  const tabDone = new Map()
+  let lastPath = location.pathname
 
   // 面板裡可能有同名的標題，所以挑「最像頁籤」的那一個來點，而不是第一個
   function findTab(label) {
-    const wanted = new RegExp(label, "i")
+    const wanted = new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
     let best = null
     let bestScore = -1
 
@@ -754,21 +760,34 @@
     return false
   }
 
-  function applyDefaultDetailTab() {
-    const label = CONFIG.defaultDetailTab
-    if (!label) return
+  // Windy 是單頁應用，切到「比較不同預報模式」只會改 path，所以每次都重新比對規則
+  function currentTabRule() {
+    const rules = CONFIG.autoTabs || []
+    return rules.find(r => r.path && location.pathname.startsWith(r.path))
+      || rules.find(r => !r.path)
+      || null
+  }
 
-    const tab = findTab(label)
+  function applyAutoTab() {
+    if (location.pathname !== lastPath) {
+      lastPath = location.pathname
+      tabDone.clear() // 換頁了，每條規則都可以再點一次
+    }
+
+    const rule = currentTabRule()
+    if (!rule?.label) return
+
+    const tab = findTab(rule.label)
     if (!tab) {
-      detailTabDone = false // 面板關了，下次打開再切一次
+      tabDone.delete(rule.label) // 面板關了，下次打開再切一次
       return
     }
-    if (detailTabDone) return
+    if (tabDone.get(rule.label)) return
 
-    detailTabDone = true
+    tabDone.set(rule.label, true)
     if (!isActive(tab)) {
       tab.click()
-      log("已切換頁籤", label)
+      log("已切換頁籤", rule.label)
     }
   }
 
@@ -780,7 +799,7 @@
       setTimeout(() => {
         scheduled = false
         try {
-          applyDefaultDetailTab()
+          applyAutoTab()
         } catch (err) {
           log("切換頁籤失敗", err)
         }
@@ -840,11 +859,15 @@
       CONFIG.defaultOverlay = name
       applyDefaultOverlay()
     },
-    openTab: (label = CONFIG.defaultDetailTab) => {
-      detailTabDone = false
-      CONFIG.defaultDetailTab = label
-      applyDefaultDetailTab()
+    openTab: (label) => {
+      const target = label || currentTabRule()?.label
+      if (!target) return null
+      tabDone.delete(target)
+      const tab = findTab(target)
+      if (tab) tab.click()
+      return tab
     },
+    tabRule: currentTabRule,
     reset: () => Object.values(KEY).forEach(k => localStorage.removeItem(k)),
   }
 })()
