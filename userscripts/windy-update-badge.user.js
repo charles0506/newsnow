@@ -2,7 +2,7 @@
 // @name         Windy 更新時間徽章 (Windy Update Badge)
 // @name:en      Windy Update Badge
 // @namespace    https://github.com/charles0506/newsnow
-// @version      2.3.1
+// @version      2.4.0
 // @description  直接在 windy.com 地圖上顯示目前預測模式的「多久前更新」與「下次更新倒數」，不用再打開 /info 資訊頁面。
 // @description:en Show model last-update / next-update countdown directly on the windy.com map, without opening the /info page.
 // @author       charles0506
@@ -323,9 +323,18 @@
   // 攔截頁面的 fetch / XHR：不管 Windy 內部怎麼改，參考時間一定得從網路來
   function sniffText(text, url) {
     if (!text || text.length > 2_000_000 || !/refTime/i.test(text)) return
+
+    // 別的模式的 refTime 套上本模式的落後量會算出錯的時間，
+    // 所以已經知道現在看的是哪個模式時，只收提到該模式的回應
+    if (state.product) {
+      const haystack = `${url} ${text.slice(0, 4000)}`.toLowerCase()
+      if (!haystack.includes(state.product.toLowerCase())) return
+    }
+
     try {
       const found = harvestRef(JSON.parse(text), `network:${url}`)
-      if (found) applyRef(found.refTime, found.product, found.source)
+      // product 一律以 window.W 為準，不讓回應裡的名稱把它改掉（會連帶清空 refTime）
+      if (found) applyRef(found.refTime, null, found.source)
     } catch { /* 不是 JSON 就算了 */ }
   }
 
@@ -426,6 +435,24 @@
       state.modelName = state.modelName || calib.modelName
       state.origin = "derived"
       persistSnapshot()
+      render()
+      return
+    }
+
+    // 讀不到參考時間（W 沒有公開）時，過了預定更新時間就照間隔往後推一輪，
+    // 免得徽章永遠停在上次校準的那一輪。推算出來的會標成「推測」。
+    if (state.lastUpdate && state.intervalMs && state.nextUpdate) {
+      const grace = 60 * 60_000 // Windy 實際發布時間會浮動，給一小時緩衝
+      let rolled = false
+      for (let i = 0; i < 64 && state.nextUpdate + grace < Date.now(); i++) {
+        state.lastUpdate = state.nextUpdate
+        state.nextUpdate += state.intervalMs
+        rolled = true
+      }
+      if (rolled) {
+        state.origin = "rolled"
+        persistSnapshot()
+      }
     }
     render()
   }
@@ -462,6 +489,11 @@
   // ---------------------------------------------------------------------------
   // 四、校準：開一個 /info 分頁，讀完數字自己關掉
   // ---------------------------------------------------------------------------
+  // Windy 的網址帶語言前綴（/zh-TW/multimodel/...），比對規則前要先拿掉
+  const LOCALE_PREFIX = /^\/[a-z]{2}(-[A-Za-z]{2,4})?(?=\/|$)/
+  const localePrefix = () => (LOCALE_PREFIX.exec(location.pathname) || [""])[0]
+  const normalizedPath = () => location.pathname.replace(LOCALE_PREFIX, "") || "/"
+
   const isInfoPage = /\/info\b/.test(location.pathname)
   const calibrateRequested = () => {
     const at = Number(localStorage.getItem(KEY.request) || 0)
@@ -470,7 +502,7 @@
 
   function startCalibration() {
     localStorage.setItem(KEY.request, String(Date.now()))
-    window.open(`${location.origin}/info?wub=calibrate`, "_blank")
+    window.open(`${location.origin}${localePrefix()}/info?wub=calibrate`, "_blank")
   }
 
   function runCalibrationTab() {
@@ -665,7 +697,7 @@
         ? "應該隨時會更新"
         : `下次更新 ${fmtCountdown(nextUpdate - Date.now())}`
 
-    const originText = { measured: "資訊頁", derived: "已校準", cached: "上次紀錄" }[state.origin] || "—"
+    const originText = { measured: "資訊頁", derived: "已校準", rolled: "推測", cached: "上次紀錄" }[state.origin] || "—"
     const rows = []
     if (state.modelName || state.product) rows.push(["模式", state.modelName || state.product])
     if (state.refTime) rows.push(["參考時間", `${fmtZ(state.refTime)}（${fmtLocal(state.refTime)}）`])
@@ -725,7 +757,7 @@
 
   // 面板關掉再打開時要能再切一次，所以用「頁籤還在不在」來決定要不要重置
   const tabDone = new Map()
-  let lastPath = location.pathname
+  let lastPath = normalizedPath()
 
   // 面板裡可能有同名的標題，所以把所有候選評分排序，挑「最像頁籤」的那一個來點
   function collectTabs(label) {
@@ -761,14 +793,15 @@
   // Windy 是單頁應用，切到「比較不同預報模式」只會改 path，所以每次都重新比對規則
   function currentTabRule() {
     const rules = CONFIG.autoTabs || []
-    return rules.find(r => r.path && location.pathname.startsWith(r.path))
+    const path = normalizedPath()
+    return rules.find(r => r.path && path.startsWith(r.path))
       || rules.find(r => !r.path)
       || null
   }
 
   function applyAutoTab() {
-    if (location.pathname !== lastPath) {
-      lastPath = location.pathname
+    if (normalizedPath() !== lastPath) {
+      lastPath = normalizedPath()
       tabDone.clear() // 換頁了，每條規則都可以再點一次
     }
 
@@ -879,8 +912,44 @@
         }
       }
       const rule = currentTabRule()
+
+      // 掃 window.W，把任何能解析成「最近的時間」的欄位連路徑一起列出來，
+      // 用來找出 Windy 到底把跑批時間放在哪裡
+      const scanTimes = () => {
+        const hits = []
+        const seen = new Set()
+        const walk = (node, path, depth) => {
+          if (!node || depth > 3 || hits.length >= 40 || seen.has(node)) return
+          seen.add(node)
+          let keys = []
+          try {
+            keys = Object.keys(node)
+          } catch {
+            return
+          }
+          for (const k of keys.slice(0, 60)) {
+            let v
+            try {
+              v = node[k]
+            } catch {
+              continue
+            }
+            if (typeof v === "function") continue
+            if (typeof v === "string" || typeof v === "number") {
+              const ms = toMs(v)
+              if (isSaneTime(ms)) hits.push({ 路徑: `${path}.${k}`, 值: v, 時間: new Date(ms).toISOString() })
+            } else if (v && typeof v === "object") {
+              walk(v, `${path}.${k}`, depth + 1)
+            }
+          }
+        }
+        walk(W, "W", 0)
+        return hits
+      }
+
+      const storeKeys = ["product", "overlay", "path", "refTime", "calendar", "acTime", "level", "pathBase", "product2"]
       const report = {
-        版本: "2.3.1",
+        版本: "2.4.0",
         網址: location.pathname + location.search,
         徽章存在: !!document.getElementById("windy-update-badge"),
         狀態: {
@@ -896,6 +965,9 @@
           overlay: safe(() => W?.store?.get?.("overlay")),
           有products: safe(() => Object.keys(W?.products || {}).length),
         },
+        路徑: { 原始: location.pathname, 去掉語言前綴: normalizedPath() },
+        store各鍵: Object.fromEntries(storeKeys.map(k => [k, safe(() => JSON.stringify(W?.store?.get?.(k))?.slice(0, 120))])),
+        W裡的時間欄位: safe(scanTimes),
         頁籤規則: rule,
         頁籤候選: rule?.label
           ? collectTabs(rule.label).map(({ text, tag, className, score }) => ({ text, tag, className, score }))
