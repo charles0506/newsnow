@@ -75,7 +75,7 @@ ECMWF 12Z 的跑批大約 +8 小時才發布，所以拿參考時間直接算「
 
 ```js
 autoTabs: [
-  { path: "/multimodel", label: "Clouds.Rain" }, // 比較不同預報模式
+  { path: "/multimodel", label: "Clouds, Rain" }, // 比較不同預報模式
   { label: "Meteogram" },                        // 此地點的天氣預報
 ],
 ```
@@ -84,7 +84,9 @@ autoTabs: [
 比對前會先拿掉網址的語言前綴（Windy 實際的網址是 `/zh-TW/multimodel/...`，不是 `/multimodel/...`），
 所以 `path` 只要寫 `/multimodel` 就好，各語言介面都適用。
 Windy 是單頁應用，切頁只改 path 不重新載入，所以每次 DOM 有變動都會重新比對規則。
-頁籤文字（`Meteogram`、`Clouds.Rain`）在中文介面下也是英文，所以不受語言影響；`label` 裡的 `.` 會當字面比對。
+頁籤文字（`Meteogram`、`Clouds, Rain`）在中文介面下也是英文，所以不受語言影響。
+比對時只看字母與數字（標點與空白一律忽略），所以 `Clouds, Rain`、`Clouds.Rain`、`Clouds & Rain`
+寫哪一種都找得到同一顆按鈕，不必去猜 Windy 用的是逗號還是句點。
 
 找頁籤時會排序候選：`<a>` / `<button>`、class 或 id 帶 `tab`/`btn` 的優先，
 免得誤點到面板裡同名的圖表標題。面板關掉再打開會再切一次，同一次開啟只會點一次。
