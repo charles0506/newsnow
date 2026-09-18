@@ -2,7 +2,7 @@
 // @name         Windy 更新時間徽章 (Windy Update Badge)
 // @name:en      Windy Update Badge
 // @namespace    https://github.com/charles0506/newsnow
-// @version      2.4.0
+// @version      2.4.1
 // @description  直接在 windy.com 地圖上顯示目前預測模式的「多久前更新」與「下次更新倒數」，不用再打開 /info 資訊頁面。
 // @description:en Show model last-update / next-update countdown directly on the windy.com map, without opening the /info page.
 // @author       charles0506
@@ -47,7 +47,7 @@
     // 由上往下比對 path，第一個命中的規則生效；path 省略代表「其他頁面」。
     // 整個設成 [] 就不要動任何頁籤。
     autoTabs: [
-      { path: "/multimodel", label: "Clouds.Rain" }, // 比較不同預報模式
+      { path: "/multimodel", label: "Clouds, Rain" }, // 比較不同預報模式
       { label: "Meteogram" }, // 此地點的天氣預報
     ],
   }
@@ -759,21 +759,26 @@
   const tabDone = new Map()
   let lastPath = normalizedPath()
 
+  // 只留字母與數字來比對，這樣 "Clouds, Rain"、"Clouds.Rain"、"Clouds & Rain"
+  // 都算同一個按鈕，不必去猜 Windy 到底用哪個標點
+  const squash = str => (str || "").toLowerCase().replace(/[^a-z0-9]+/g, "")
+
   // 面板裡可能有同名的標題，所以把所有候選評分排序，挑「最像頁籤」的那一個來點
   function collectTabs(label) {
-    const wanted = new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+    const wanted = squash(label)
+    if (!wanted) return []
     const found = []
 
     for (const node of document.querySelectorAll("a, button, li, span, div")) {
       if (node.children.length > 1) continue // 只看最裡層的文字節點
       const text = (node.textContent || "").trim()
-      if (text.length > 20 || !wanted.test(text)) continue
+      if (text.length > 24 || !squash(text).includes(wanted)) continue
       if (!node.offsetParent && node.offsetWidth === 0) continue // 沒顯示出來
 
       const hint = `${node.className || ""} ${node.id || ""} ${node.getAttribute?.("role") || ""}`
       let score = 0
       if (node.tagName === "A" || node.tagName === "BUTTON") score += 3
-      if (/tab|btn|button|switch|menu/i.test(hint)) score += 2
+      if (/tab|btn|button|switch|menu|chip|pill|option|selector/i.test(hint)) score += 2
       if (node.getAttribute?.("data-do") || node.getAttribute?.("data-ref")) score += 1
       found.push({ node, text, tag: node.tagName, className: node.className || "", score })
     }
@@ -912,6 +917,7 @@
         }
       }
       const rule = currentTabRule()
+      const candidates = rule?.label ? collectTabs(rule.label) : []
 
       // 掃 window.W，把任何能解析成「最近的時間」的欄位連路徑一起列出來，
       // 用來找出 Windy 到底把跑批時間放在哪裡
@@ -949,7 +955,7 @@
 
       const storeKeys = ["product", "overlay", "path", "refTime", "calendar", "acTime", "level", "pathBase", "product2"]
       const report = {
-        版本: "2.4.0",
+        版本: "2.4.1",
         網址: location.pathname + location.search,
         徽章存在: !!document.getElementById("windy-update-badge"),
         狀態: {
@@ -969,9 +975,16 @@
         store各鍵: Object.fromEntries(storeKeys.map(k => [k, safe(() => JSON.stringify(W?.store?.get?.(k))?.slice(0, 120))])),
         W裡的時間欄位: safe(scanTimes),
         頁籤規則: rule,
-        頁籤候選: rule?.label
-          ? collectTabs(rule.label).map(({ text, tag, className, score }) => ({ text, tag, className, score }))
-          : [],
+        頁籤候選: candidates.map(({ text, tag, className, score }) => ({ text, tag, className, score })),
+        // 找不到目標時，把畫面上所有短文字列出來，直接看得到按鈕實際叫什麼
+        畫面上的短文字: candidates.length
+          ? "（有找到候選，略）"
+          : safe(() => [...document.querySelectorAll("a, button, li, span, div")]
+              .filter(n => n.children.length <= 1 && n.offsetParent)
+              .map(n => (n.textContent || "").trim())
+              .filter(t => t && t.length <= 24)
+              .filter((t, i, arr) => arr.indexOf(t) === i)
+              .slice(0, 60)),
         資訊頁解析: safe(() => parseInfoPage(document.body?.innerText)),
       }
       console.log(JSON.stringify(report, null, 2))
