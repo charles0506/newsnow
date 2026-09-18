@@ -2,7 +2,7 @@
 // @name         Windy 更新時間徽章 (Windy Update Badge)
 // @name:en      Windy Update Badge
 // @namespace    https://github.com/charles0506/newsnow
-// @version      2.3.0
+// @version      2.3.1
 // @description  直接在 windy.com 地圖上顯示目前預測模式的「多久前更新」與「下次更新倒數」，不用再打開 /info 資訊頁面。
 // @description:en Show model last-update / next-update countdown directly on the windy.com map, without opening the /info page.
 // @author       charles0506
@@ -727,11 +727,10 @@
   const tabDone = new Map()
   let lastPath = location.pathname
 
-  // 面板裡可能有同名的標題，所以挑「最像頁籤」的那一個來點，而不是第一個
-  function findTab(label) {
+  // 面板裡可能有同名的標題，所以把所有候選評分排序，挑「最像頁籤」的那一個來點
+  function collectTabs(label) {
     const wanted = new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
-    let best = null
-    let bestScore = -1
+    const found = []
 
     for (const node of document.querySelectorAll("a, button, li, span, div")) {
       if (node.children.length > 1) continue // 只看最裡層的文字節點
@@ -739,19 +738,18 @@
       if (text.length > 20 || !wanted.test(text)) continue
       if (!node.offsetParent && node.offsetWidth === 0) continue // 沒顯示出來
 
-      const tag = node.tagName
       const hint = `${node.className || ""} ${node.id || ""} ${node.getAttribute?.("role") || ""}`
       let score = 0
-      if (tag === "A" || tag === "BUTTON") score += 3
+      if (node.tagName === "A" || node.tagName === "BUTTON") score += 3
       if (/tab|btn|button|switch|menu/i.test(hint)) score += 2
       if (node.getAttribute?.("data-do") || node.getAttribute?.("data-ref")) score += 1
-      if (score > bestScore) {
-        best = node
-        bestScore = score
-      }
+      found.push({ node, text, tag: node.tagName, className: node.className || "", score })
     }
-    return best
+
+    return found.sort((a, b) => b.score - a.score)
   }
+
+  const findTab = label => collectTabs(label)[0]?.node || null
 
   function isActive(node) {
     for (let n = node; n && n !== document.body; n = n.parentElement) {
@@ -869,5 +867,43 @@
     },
     tabRule: currentTabRule,
     reset: () => Object.values(KEY).forEach(k => localStorage.removeItem(k)),
+
+    // 一行把所有需要的資訊印出來，方便回報問題
+    dump: () => {
+      const W = window.W
+      const safe = (fn) => {
+        try {
+          return fn()
+        } catch (err) {
+          return `error: ${err.message}`
+        }
+      }
+      const rule = currentTabRule()
+      const report = {
+        版本: "2.3.1",
+        網址: location.pathname + location.search,
+        徽章存在: !!document.getElementById("windy-update-badge"),
+        狀態: {
+          ...state,
+          參考時間: state.refTime ? new Date(state.refTime).toISOString() : null,
+          發布於: state.lastUpdate ? new Date(state.lastUpdate).toISOString() : null,
+          下次: state.nextUpdate ? new Date(state.nextUpdate).toISOString() : null,
+        },
+        校準表: readJSON(KEY.calib, {}),
+        windowW: {
+          存在: typeof W,
+          product: safe(() => W?.store?.get?.("product")),
+          overlay: safe(() => W?.store?.get?.("overlay")),
+          有products: safe(() => Object.keys(W?.products || {}).length),
+        },
+        頁籤規則: rule,
+        頁籤候選: rule?.label
+          ? collectTabs(rule.label).map(({ text, tag, className, score }) => ({ text, tag, className, score }))
+          : [],
+        資訊頁解析: safe(() => parseInfoPage(document.body?.innerText)),
+      }
+      console.log(JSON.stringify(report, null, 2))
+      return report
+    },
   }
 })()

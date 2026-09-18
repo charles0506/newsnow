@@ -97,6 +97,7 @@ Windy 是單頁應用，切頁只改 path 不重新載入，所以每次 DOM 有
 | `__windyUpdateBadge.parseInfoPage()` | 在資訊頁上測試解析結果 |
 | `__windyUpdateBadge.calibrate()` | 手動重新校準 |
 | `__windyUpdateBadge.reset()` | 清掉所有紀錄重來 |
+| `__windyUpdateBadge.dump()` | **回報問題用**：一次印出版本、狀態、校準表、`window.W` 的 product/overlay、目前命中的頁籤規則與所有候選（含評分），直接複製主控台輸出即可 |
 
 - 數字整個對不上 → 先 `reset()` 再校準一次。
 - 一直顯示「未校準」→ 按「校準」按鈕；若分頁沒自動關，代表 Windy 的資訊頁文字換了格式，
