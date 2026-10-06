@@ -1,4 +1,5 @@
 import { Homepage } from "@shared/consts"
+import { Link } from "@tanstack/react-router"
 import clsx from "clsx"
 import { motion } from "framer-motion"
 import { useEffect, useRef, useState } from "react"
@@ -76,6 +77,12 @@ export function Menu() {
                     </li>
                   )}
               <ThemeToggle />
+              <li>
+                <Link to="/health" className="flex items-center gap-2 w-full">
+                  <span className="i-ph:heart-pulse-duotone inline-block" />
+                  <span>健康分析</span>
+                </Link>
+              </li>
               <li onClick={() => window.open(Homepage)}>
                 <span className="i-ph:github-logo-duotone inline-block" />
                 <span>Star on Github </span>
