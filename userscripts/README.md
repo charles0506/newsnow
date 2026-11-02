@@ -118,3 +118,26 @@ Windy 是單頁應用，切頁只改 path 不重新載入，所以每次 DOM 有
 
 > 校準值只是「發布時間比參考時間晚多久」的估計，來源是 Windy 頁面上以小時為單位的文字，
 > 所以可能有幾分鐘誤差；每進一次資訊頁都會自動重新校準一次。
+
+---
+
+# Threads 圖片下載轉 JPG
+
+在 [threads.com](https://www.threads.com) 把滑鼠移到貼文圖片上，右上角會出現 **「⬇ JPG」** 按鈕，
+點一下就把**原尺寸**圖片轉成 JPG 下載（Threads 的圖多半是 WebP，很多軟體打不開）。
+
+檔案：[`threads-image-jpg.user.js`](./threads-image-jpg.user.js)
+安裝連結：<https://raw.githubusercontent.com/charles0506/newsnow/main/userscripts/threads-image-jpg.user.js>
+
+| 操作 | 效果 |
+| --- | --- |
+| 滑到圖片上 →「⬇ JPG」 | 下載這張圖 |
+| **Alt + 點圖片** | 不用瞄準按鈕，直接下載 |
+| 擴充功能選單「🖼 JPG 品質」 | 在 92% / 85% / 100% 之間切換 |
+
+- 檔名：`threads_帳號_貼文代碼_日期時間.jpg`，抓不到帳號或代碼時會省略該段。
+- 會挑 `srcset` 裡最大的那張，不是畫面上的縮圖；透明的地方填白底（JPG 不支援透明）。
+- 小於 120px 的圖（大頭貼、表情符號）不出按鈕。
+- 連續下載第二張時，Chrome 可能在網址列跳出「**允許下載多個檔案**」，按允許一次就好。
+- 用 `GM_xmlhttpRequest` 抓原檔，是為了避開跨網域圖片畫到 canvas 後無法匯出的限制；
+  安裝時 Tampermonkey 若詢問是否允許連到 `cdninstagram.com` / `fbcdn.net`，請按允許。
